@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "editor010-mcp"
+version = "0.1.0"
+description = "Independent local MCP bridge for binary files and an existing 010 Editor session"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["mcp>=2.3.0,<3"]
+
+[project.scripts]
+editor010-mcp = "editor010_mcp.server:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3,<9", "pytest-asyncio>=1.0,<2", "ruff>=0.14,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/editor010_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"bridge/scripts" = "editor010_mcp/bridge_scripts"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["live_editor: opt-in tests using a real 010 Editor session"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

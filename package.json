@@ -1,0 +1,13 @@
+{
+  "name": "010-editor-mcp-development",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "setup": "uv sync --dev",
+    "test": "uv run --frozen pytest",
+    "lint": "uv run --frozen ruff check .",
+    "format": "uv run --frozen ruff format .",
+    "check": "pnpm lint && pnpm test",
+    "start": "uv run --frozen editor010-mcp"
+  }
+}

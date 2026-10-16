@@ -1,0 +1,94 @@
+// 010 Editor MCP Bridge 0.1, independent of SweetScape.
+// This is a versioned renderer template, NOT a user-run script.
+// Python substitutes only validated numbers and quoted string literals.
+RequiresVersion(13, 0);
+// A newly spawned process inherits this marker; the existing GUI does not.
+// This rejects accidental new-instance execution if single-instance mode changed.
+if (GetEnv("EDITOR010_MCP_NEW_PROCESS") == "1") return;
+
+string Json(string value) {
+    string result = "\"";
+    int i, ch;
+    for (i = 0; i < Strlen(value); i++) {
+        ch = (uchar)value[i];
+        if (ch == 34) result += "\\\"";
+        else if (ch == 92) result += "\\\\";
+        else if (ch < 32) result += Str("\\u%04x", ch);
+        else result += Str("%c", ch);
+    }
+    return result + "\"";
+}
+
+int original = GetFileNum();
+string requestId = @REQUEST_ID@;
+string markerPath = @MARKER@;
+string responsePath = @RESPONSE@;
+string payloadPath = @PAYLOAD@;
+string operation = @OPERATION@;
+int expectedIndex = @INDEX@;
+string expectedName = @NAME@;
+int64 expectedSize = @SIZE@;
+int64 offset = @OFFSET@;
+int length = @LENGTH@;
+string templatePath = @TEMPLATE@;
+string errorCode = "";
+string errorMessage = "";
+string fields = "";
+
+// If a command was queued behind a dialog/script and the caller timed out,
+// the removed marker cancels it BEFORE any document operation.
+if (!FileExists(markerPath)) return;
+if (original < 0) {
+    errorCode = "NO_ACTIVE_BUFFER";
+    errorMessage = "Open an ordinary document in the existing editor session.";
+} else if (IsDrive() || IsProcess()) {
+    errorCode = "PATH_NOT_ALLOWED";
+    errorMessage = "Raw drives and live process buffers are not supported.";
+} else if (operation != "context" &&
+           (original != expectedIndex || GetFileName() != expectedName ||
+            FileSize() != expectedSize)) {
+    errorCode = "STALE_CONTEXT";
+    errorMessage = "The active document changed; request a new editor_context.";
+} else if ((operation == "read" || operation == "select") &&
+           (offset < 0 || length < 0 || offset > FileSize() ||
+            length > FileSize() - offset)) {
+    errorCode = "OUT_OF_BOUNDS";
+    errorMessage = "Byte range exceeds the live buffer.";
+} else {
+    if (operation == "read" && length > 0) {
+        if (FileSaveRange(payloadPath, offset, length) < 0) {
+            errorCode = "IO_ERROR";
+            errorMessage = "Could not export live buffer bytes to temporary storage.";
+        }
+    } else if (operation == "select") {
+        if (FileExists(markerPath)) SetSelection(offset, length);
+    } else if (operation == "template") {
+        if (!FileExists(markerPath)) return;
+        RunTemplate(templatePath, false);
+        ExpandAll();
+        ExportXML(payloadPath);
+    }
+    fields = Str(
+        "\"index\":%d,\"path\":%s,\"size\":%Ld,\"dirty\":%d," +
+        "\"read_only\":%d,\"selection\":{\"offset\":%Ld,\"length\":%Ld}," +
+        "\"cursor_offset\":%Ld,\"display_start_address\":%Ld",
+        original, Json(GetFileName()), FileSize(), IsModified(), GetReadOnly(),
+        GetSelSize() > 0 ? GetSelStart() : GetCursorPos(),
+        GetSelSize(), GetCursorPos(), GetStartingAddress());
+}
+string response = "{\"protocol\":1,\"request_id\":" + Json(requestId);
+if (errorCode != "") {
+    response += ",\"error\":{\"code\":" + Json(errorCode) +
+        ",\"message\":" + Json(errorMessage) + ",\"details\":{}}}";
+} else response += ",\"result\":{" + fields + "}}";
+
+// Only this owned scratch document is closed. Source FileSave is never used.
+int output = FileNew("Hex", false);
+FPrintf(output, "%s", response);
+FileSelect(output);
+string stagingPath = responsePath + ".staging";
+int responseSaved = FileSaveRange(stagingPath, 0, FileSize());
+FileClose();
+if (original >= 0) FileSelect(original);
+// Publish completion only AFTER scratch cleanup and target restoration.
+if (responseSaved >= 0) RenameFile(stagingPath, responsePath);

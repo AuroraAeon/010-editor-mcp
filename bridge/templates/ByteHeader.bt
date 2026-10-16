@@ -1,0 +1,9 @@
+//------------------------------------------------
+// Trusted, deterministic demo template (independent integration).
+// Parse at most eight bytes; no external I/O or mutation.
+//------------------------------------------------
+LittleEndian();
+if (FileSize() > 0) {
+    uchar first_byte;
+    if (FileSize() > 1) uchar next_bytes[Min(FileSize() - 1, 7)];
+}
