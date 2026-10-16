@@ -17,6 +17,12 @@ Date: 2026-10-16. Local runtime: Windows, CPython 3.12.14, official MCP SDK 2.3.
   passed against an isolated installed wheel**, imported from site-packages.
 - Wheel build and inclusion of `bridge_scripts/command.1sc` passed. No editor
   installation is needed for standalone operation.
+- The final wheel (including staged-reply publication) was reinstalled into a
+  fresh isolated environment. Package/resource lookup, 14-tool discovery,
+  a byte read through MCP, and unavailable-editor reporting all passed.
+- [GitHub Actions run 38844282123](https://github.com/AuroraAeon/010-editor-mcp/actions/runs/38844282123)
+  passed on implementation commit `7c0b37d`: Windows/Linux × Python 3.11/3.13,
+  including lint, the portable suite and wheel-resource validation.
 - A real 010 Editor 16.0.4 GUI retained the same process while command forwarding
   identified its active document and read an unsaved `AA` byte at offset 1;
   disk still contained `11`. Dirty state, custom display origin, selection
