@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -89,9 +90,11 @@ def test_success_cleans_owned_files_and_restores_prior(environment, capsys):
     setup, cleanup = environment.calls["probe"]
     assert setup[0] == cleanup[0] and not setup[0].exists()
     assert environment.calls["launch"] == [
-        [str(environment.process.exe), str(setup[0] / "probe.bin")]
+        [str(environment.process.exe), str(setup[0] / "probe.bin")],
+        [str(environment.process.exe), str(environment.prior)],
     ]
     assert json.dumps(str(environment.prior)) in cleanup[1]
+    assert "<0" in cleanup[1]
     assert "FileClose()" in cleanup[1]
     assert environment.prior.read_bytes() == b"prior"
 
@@ -137,3 +140,62 @@ def test_partial_setup_failure_attempts_owned_cleanup(environment, monkeypatch, 
     report = invoke(environment.args, capsys, 1)
     assert report["cleanup"] == "passed"
     assert len(environment.calls["probe"]) == 2
+
+
+def test_owned_file_cleanup_waits_for_editor_handle(tmp_path, monkeypatch):
+    owned = tmp_path / "probe.bin"
+    owned.write_bytes(b"fixture")
+    original = Path.unlink
+    attempts = []
+
+    def unlink(path, **kwargs):
+        attempts.append(path)
+        if len(attempts) < 3:
+            raise PermissionError("Editor still holds the closed fixture.")
+        original(path, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(verify_live.time, "sleep", lambda _: None)
+    verify_live._remove_owned_file(owned, 1)
+    assert attempts == [owned, owned, owned]
+    assert not owned.exists()
+
+
+def test_owned_file_cleanup_timeout_retains_file(tmp_path, monkeypatch):
+    owned = tmp_path / "probe.bin"
+    owned.write_bytes(b"fixture")
+
+    def locked(path, **kwargs):
+        raise PermissionError("Editor handle remains locked.")
+
+    ticks = iter((0, 2))
+    monkeypatch.setattr(Path, "unlink", locked)
+    monkeypatch.setattr(verify_live.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(PermissionError):
+        verify_live._remove_owned_file(owned, 1)
+    assert owned.read_bytes() == b"fixture"
+
+
+def test_empty_editor_cleanup_uses_only_owned_anchor(environment, monkeypatch, capsys):
+    class EmptyBackend:
+        def __init__(self, _):
+            pass
+
+        def context(self):
+            if not environment.calls["probe"]:
+                raise BridgeError("NO_ACTIVE_BUFFER", "No document is active.")
+            owned = environment.calls["probe"][0][0]
+            return {"index": 0, "path": str(owned / "cleanup.bin")}
+
+    monkeypatch.setattr(verify_live, "EditorBackend", EmptyBackend)
+    report = invoke(environment.args, capsys)
+    assert report["cleanup"] == "passed"
+    owned = environment.calls["probe"][0][0]
+    assert environment.calls["launch"] == [
+        [str(environment.process.exe), str(owned / "probe.bin")],
+        [str(environment.process.exe), str(owned / "cleanup.bin")],
+        [str(environment.process.exe), "-close"],
+    ]
+    assert len(environment.calls["probe"]) == 3
+    assert not owned.exists()
+    assert environment.prior.read_bytes() == b"prior"

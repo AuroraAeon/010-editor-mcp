@@ -84,8 +84,8 @@ if (errorCode != "") {
 
 // Only this owned scratch document is closed. Source FileSave is never used.
 int output = FileNew("Hex", false);
-FPrintf(output, "%s", response);
 FileSelect(output);
+FPrintf(output, "%s", response);
 string stagingPath = responsePath + ".staging";
 int responseSaved = FileSaveRange(stagingPath, 0, FileSize());
 FileClose();

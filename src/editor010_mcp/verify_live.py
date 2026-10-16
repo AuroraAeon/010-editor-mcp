@@ -31,6 +31,33 @@ def _require(condition: Any, check: str) -> None:
         raise BridgeError("VERIFICATION_FAILED", check)
 
 
+def _remove_owned_file(path: Path, timeout: float) -> None:
+    """Wait for 010 Editor to release a just-closed verifier file on Windows."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.05, remaining))
+
+
+def _editor_command(settings: Settings, process: EditorProcess, *args: str) -> None:
+    """Run verifier-only document commands in the pinned existing process."""
+    _require(discover(settings).identity == process.identity, "editor_session_changed")
+    subprocess.run(
+        [str(process.exe), *args],
+        check=True,
+        timeout=settings.editor_timeout,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    _require(discover(settings).identity == process.identity, "editor_session_changed")
+
+
 def _probe(settings: Settings, process: EditorProcess, work: Path, body: str) -> None:
     """Trusted verifier-only setup/cleanup, never an exposed MCP script tool."""
     transport = BridgeTransport(settings)
@@ -52,7 +79,7 @@ def _probe(settings: Settings, process: EditorProcess, work: Path, body: str) ->
             f"if(!FileExists({quote(marker)})) return;\n" + body + "\nint target=GetFileNum();\n"
             'string response=Str("{\\"ok\\":%d}",check);\n'
             'int output=FileNew("Hex",false);\n'
-            'FPrintf(output,"%s",response);\nFileSelect(output);\n'
+            'FileSelect(output);\nFPrintf(output,"%s",response);\n'
             f'FileSaveRange({quote(reply)}+".staging",0,FileSize());\n'
             "FileClose();\nif(target>=0) FileSelect(target);\n"
             f'RenameFile({quote(reply)}+".staging",{quote(reply)});\n'
@@ -229,14 +256,7 @@ def main(argv: list[str] | None = None) -> None:
         prepared = True  # Cleanup also runs after partial setup failures.
         # FileSelect is the script's I/O target; GUI options may restore the
         # original tab after it exits. Explicitly activate only our owned file.
-        subprocess.run(
-            [str(process.exe), str(fixture)],
-            check=True,
-            timeout=settings.editor_timeout,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _require(discover(settings).identity == process.identity, "editor_session_changed")
+        _editor_command(settings, process, str(fixture))
         _probe(
             settings,
             process,
@@ -265,8 +285,16 @@ def main(argv: list[str] | None = None) -> None:
         )
     finally:
         if prepared and owned is not None and process is not None:
+            cleanup_phase = "close_fixture"
             try:
                 quoted = json.dumps(str(owned / "probe.bin"), ensure_ascii=False)
+                # Close the fixture from another script target so the editor's
+                # Show Target File preference cannot reactivate the closed tab.
+                anchor = owned / "cleanup.bin"
+                cleanup_target = previous["path"] if previous is not None else str(anchor)
+                if previous is None:
+                    anchor.write_bytes(b"")
+                _editor_command(settings, process, cleanup_target)
                 restore = ""
                 if previous is not None:
                     name = json.dumps(previous["path"], ensure_ascii=False)
@@ -275,22 +303,46 @@ def main(argv: list[str] | None = None) -> None:
                         "if(restore>=0) {FileSelect(restore);\n"
                         f"if(GetFileName()!={name}) check=0;}} else check=0;\n"
                     )
+                cleanup_phase = "verify_closed"
                 _probe(
                     settings,
                     process,
                     owned,
                     f"int owned=FindOpenFile({quoted});\n"
                     f"if(owned>=0) {{FileSelect(owned); if(GetFileName()!={quoted}) return;"
-                    "FileClose();}\nint check=1;\n" + restore,
+                    "FileClose();}\n"
+                    f"int check=FindOpenFile({quoted})<0;\n" + restore,
                 )
-                for name in ("probe.bin", "probe.bt"):
-                    (owned / name).unlink(missing_ok=True)
+                cleanup_phase = "restore_document"
+                if previous is not None:
+                    current = EditorBackend(settings).context()
+                    _require(current["path"] == previous["path"], "original_document_not_restored")
+                else:
+                    current = EditorBackend(settings).context()
+                    _require(Path(current["path"]).resolve() == anchor, "cleanup_anchor_not_active")
+                    _editor_command(settings, process, "-close")
+                    _probe(
+                        settings,
+                        process,
+                        owned,
+                        f"int check=FindOpenFile({json.dumps(str(anchor))})<0;\n",
+                    )
+                cleanup_phase = "remove_fixture"
+                for name in ("probe.bin", "probe.bt", "cleanup.bin"):
+                    _remove_owned_file(owned / name, settings.editor_timeout)
+                cleanup_phase = "remove_directory"
                 owned.rmdir()
                 report["cleanup"] = "passed"
             except Exception as exc:
                 report.update(status="failed", cleanup="failed", artifacts_retained=True)
                 if isinstance(exc, BridgeError):
                     report["cleanup_error"] = {"code": exc.code, "check": exc.message}
+                else:
+                    report["cleanup_error"] = {
+                        "code": "CLEANUP_FAILED",
+                        "phase": cleanup_phase,
+                        "exception": type(exc).__name__,
+                    }
         print(json.dumps(report, sort_keys=True))
     raise SystemExit(0 if report["status"] == "passed" else 1)
 
