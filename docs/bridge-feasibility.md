@@ -3,13 +3,13 @@
 Investigation date: 2026-10-16. Host: Windows; installed 010 Editor 16.0.4
 (PE version 16.0.4.0). No user editor process was running at discovery. A
 disposable GUI session was launched for the spike; subsequent commands targeted
-that same already-running process. No commercial editor files are distributed.
+that same already-running process.
 
 ## Documented
 
 - [`-script:` and command forwarding](https://www.sweetscape.com/010editor/manual/CommandLine.htm):
   command-line execution and script arguments are supported. Loading files can
-  target an already-running instance. This alone does not prove live-buffer reads.
+  target an already-running instance.
 - [Single-instance setting](https://www.sweetscape.com/010editor/manual/OptionsGeneral.htm):
   keep “Allow Only One Instance of 010 Editor” enabled.
 - [Interface functions](https://www.sweetscape.com/010editor/manual/FuncInterface.htm):
@@ -36,8 +36,7 @@ The mandatory experiment used the owned eight-byte fixture `00 11 22 33 44 55 66
    used display origin `0x1000`.
 3. `FileSaveRange` exported `00 AA 22 33 44 55 66 77`. The source file remained
    `00 11 22 33 44 55 66 77`. A subsequent script reported `IsModified() == 1`,
-   the same active document, and the same selection. Therefore this was a
-   real unsaved-buffer read, not a disk read or a subprocess-exit inference.
+   the same active document and selection.
 4. The implemented transport's context/read operations reproduced these results
    and preserved selection and display origin. Only the owned scratch response
    buffer was created/closed.
@@ -51,10 +50,8 @@ The mandatory experiment used the owned eight-byte fixture `00 11 22 33 44 55 66
    the existing GUI and returned the dirty buffer, showing that forwarding
    does not inherit the launcher's environment into the original process.
 
-The executable verifier and MCP integration test results are recorded in
-[verification.md](verification.md). Versioned scripts are under `bridge/scripts`.
-Private scratch output, absolute machine paths, and editor configuration/license
-files remain outside version control.
+Current results are in [verification.md](verification.md). Versioned scripts are
+under `bridge/scripts`; scratch output stays in the ignored `.local` directory.
 
 ## Observed failures and corrections
 
@@ -85,14 +82,33 @@ files remain outside version control.
   locked byte and returns typed `EDITOR_BUSY`; an actual local contention test
   verifies it.
 
+## Full verifier rerun, 2026-10-16
+
+The corrected verifier passed all eight MCP checks on the existing 010 Editor
+16.0.4.0 process. The pytest GUI case also passed. The fixture was closed and
+removed, and the previous active document was restored.
+
+During the rerun, the old cleanup script returned success while its dirty target
+tab remained open. File deletion then raised `PermissionError`. The corrected
+cleanup activates the previous document, closes the owned fixture from that
+separate script target, checks `FindOpenFile`, and confirms the restored context.
+It waits for Windows handles to release before removing files and reports the
+cleanup phase if a failure remains. When the editor starts empty, an owned empty
+anchor provides the separate cleanup target.
+
+The passing report contains `status: passed`, `cleanup: passed`, and
+`process_preserved: true`. [Run command](editor-setup.md#verify-the-real-gui).
+
+An empty-session check found that `FPrintf` requires an active script I/O target.
+Response writers now select their owned scratch buffer before writing, allowing
+the bridge to return `NO_ACTIVE_BUFFER` when no source document is open.
+
 ## Unsupported or unverified
 
-**Unsaved-buffer patch apply is unsupported.** A sequential read/check/write
-script is not atomic against user edits. `SetReadOnly` and native replacement
-functions have no documented exclusive-CAS guarantee. The public tool returns
-`CAPABILITY_UNSUPPORTED`; it never invokes `WriteBytes` or `FileSave`. The
-write used in the disposable spike proves unsaved edits are possible, not that
-safe concurrent mutation is possible.
+**Unsaved-buffer patch apply is unsupported.** A sequential read/check/write can
+race user edits. `SetReadOnly` and native replacement functions have no documented
+atomic guarantee. The public tool returns `CAPABILITY_UNSUPPORTED`. The
+[architecture](architecture.md#editor-mutation-boundary) defines this rule.
 
 Context tokens bind session PID/creation-time, active index, filename and size.
 They cannot detect closing and reopening the same path with identical size.

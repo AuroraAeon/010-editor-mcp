@@ -19,6 +19,8 @@ Before committing to a GUI integration design, check the current official 010 Ed
 
 Keep instructions and code straightforward. Use subagents only when the environment supports them and two genuinely independent tasks can run in parallel without conflicting edits. Run targeted tests after material changes; do not repeatedly rerun unaffected suites without cause. Continue toward the acceptance criteria rather than stopping after scaffolding or the first passing test.
 
+For documentation changes, follow [docs/writing-guide.md](docs/writing-guide.md). Use [docs/README.md](docs/README.md) to find the document that owns each topic.
+
 ## Product capabilities
 
 ### A. Standalone binary backend (works without 010 Editor)
