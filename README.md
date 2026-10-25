@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/auroraaeon-010-editor-mcp-1g95mn?v=7342162baccc5cb5c788403dcbbe3c25)](https://m8ven.ai/mcp/auroraaeon-010-editor-mcp-1g95mn?s=readme)
+
 A local **stdio MCP server** for binary-file analysis and an existing 010 Editor
 session. The portable engine works on disk files; the editor bridge reads
 in-memory buffers, including unsaved changes.
